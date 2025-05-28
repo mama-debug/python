@@ -10,12 +10,9 @@ PRICE_USD = 150
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# invoice_id -> user_id
 invoice_users = {}
-# user_id -> 'ru' or 'en'
 user_languages = {}
 
-# Тексты на двух языках
 TEXTS = {
     "ru": {
         "welcome": "👋 Привет! Это бот для оплаты доступа к приватному каналу.\n\n🔞 Более 120 порно видео и 200 фото с нами!",
@@ -37,16 +34,13 @@ TEXTS = {
     }
 }
 
-# Обработка команды /start
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
-    # Кнопки выбора языка
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add('🇷🇺 Русский', '🇬🇧 English')
     bot.send_message(chat_id, TEXTS["ru"]["choose_lang"], reply_markup=markup)
 
-# Выбор языка
 @bot.message_handler(func=lambda msg: msg.text in ['🇷🇺 Русский', '🇬🇧 English'])
 def choose_language(message):
     chat_id = message.chat.id
@@ -56,14 +50,17 @@ def choose_language(message):
     bot.send_message(chat_id, TEXTS[lang]["welcome"], parse_mode="Markdown", reply_markup=telebot.types.ReplyKeyboardRemove())
 
     pay_url, invoice_id = create_payment_link(PRICE_USD, chat_id)
-    if invoice_id:
+    if pay_url and invoice_id:
         invoice_users[invoice_id] = chat_id
-        bot.send_message(chat_id, f"{TEXTS[lang]['pay']}: {pay_url}")
-        bot.send_message(chat_id, TEXTS[lang]['after_pay'])
+        
+        markup = telebot.types.InlineKeyboardMarkup()
+        pay_button = telebot.types.InlineKeyboardButton(text=TEXTS[lang]['pay'], url=pay_url)
+        markup.add(pay_button)
+        
+        bot.send_message(chat_id, TEXTS[lang]['after_pay'], reply_markup=markup)
     else:
         bot.send_message(chat_id, TEXTS[lang]['pay_error'])
 
-# Проверка оплаты
 @bot.message_handler(commands=['check'])
 def check_payment(message):
     chat_id = message.chat.id
@@ -82,7 +79,6 @@ def check_payment(message):
     if not found:
         bot.send_message(chat_id, TEXTS[lang]['not_paid'])
 
-# Генерация ссылки на оплату
 def create_payment_link(amount_usd, chat_id):
     headers = {
         "Crypto-Pay-API-Token": CRYPTOPAY_API_TOKEN
@@ -98,24 +94,28 @@ def create_payment_link(amount_usd, chat_id):
         "payload": f"user_{chat_id}"
     }
 
-    response = requests.post("https://pay.crypt.bot/api/createInvoice", json=payload, headers=headers)
-    if response.status_code == 200:
+    try:
+        response = requests.post("https://pay.crypt.bot/api/createInvoice", json=payload, headers=headers)
+        response.raise_for_status()
         result = response.json()['result']
         return result['pay_url'], result['invoice_id']
-    else:
+    except Exception as e:
+        print(f"Error creating payment link: {e}")
         return None, None
 
-# Проверка статуса оплаты
 def check_invoice_status(invoice_id):
     headers = {"Crypto-Pay-API-Token": CRYPTOPAY_API_TOKEN
     }
 
-    response = requests.get("https://pay.crypt.bot/api/getInvoices", headers=headers)
-    if response.status_code == 200:
+    try:
+        response = requests.get("https://pay.crypt.bot/api/getInvoices", headers=headers)
+        response.raise_for_status()
         items = response.json().get("result", {}).get("items", [])
         for invoice in items:
             if invoice['invoice_id'] == invoice_id:
                 return invoice['status']
+    except Exception as e:
+        print(f"Error checking invoice status: {e}")
     return "unknown"
 
 bot.polling()
